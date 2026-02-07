@@ -6,3 +6,19 @@ database:
   dsn: root:15946qwseR@tcp(127.0.0.1:3306)/ccrt?charset=utf8mb4&parseTime=True&loc=Local
   MaxIdleConns: 10
   MaxOpenConns: 100
+
+jwt:
+  secret: change-me-in-prod
+
+sms:
+  schemeName: "测试方案"
+  templateCode: "100001"
+  signName: "速通互联验证码"
+  codeLength: 6
+  validTimeSec: 300
+  intervalSec: 60
+  returnVerifyCode: true  # 开发调试用，返回验证码
+  # 开发联调用，可填；生产强烈建议用环境变量/凭据链且不要提交真实值到仓库
+  accessKeyId: "LTAI5tNuvn83uJnkYG9WVaQj"
+  accessKeySecret: "7OgnDVFcbpOl2xTrxsbPVEtlLTtfOT"
+  securityToken: ""

@@ -8,11 +8,11 @@ import (
 
 func main() {
 	config.InitConfig()
-	fmt.Println(config.AppConfig.App.Port)
 	r := router.SetupRouter()
 	port := config.AppConfig.App.Port
 	if port == "" {
-		port = "8080"
+		port = ":8080"
 	}
+	fmt.Printf("Server starting on %s\n", port)
 	r.Run(port)
 }
