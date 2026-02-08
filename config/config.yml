@@ -8,7 +8,7 @@ database:
   MaxOpenConns: 100
 
 jwt:
-  secret: change-me-in-prod
+  secret: Df8skL9#vM2
 
 sms:
   schemeName: "测试方案"
@@ -18,7 +18,6 @@ sms:
   validTimeSec: 300
   intervalSec: 60
   returnVerifyCode: true  # 开发调试用，返回验证码
-  # 开发联调用，可填；生产强烈建议用环境变量/凭据链且不要提交真实值到仓库
   accessKeyId: "LTAI5tNuvn83uJnkYG9WVaQj"
   accessKeySecret: "7OgnDVFcbpOl2xTrxsbPVEtlLTtfOT"
   securityToken: ""
