@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"ccrt_sever/global"
 	"ccrt_sever/models"
@@ -52,12 +53,7 @@ func Register(ctx *gin.Context) {
 		return
 	}
 
-	token, err := utils.GenerateJWT(user.Username)
-	if err != nil {
-		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not generate token")
-		return
-	}
-	utils.RespondOK(ctx, gin.H{"token": token})
+	respondWithTokens(ctx, user)
 }
 
 // Login 登录：密码/短信二选一
@@ -118,10 +114,116 @@ func Login(ctx *gin.Context) {
 		}
 	}
 
-	token, err := utils.GenerateJWT(user.Username)
+	respondWithTokens(ctx, user)
+}
+
+// RefreshToken 使用 refresh_token 换取新的 access_token（并轮换 refresh_token）
+func RefreshToken(ctx *gin.Context) {
+	var req RefreshTokenRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		utils.RespondError(ctx, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request")
+		return
+	}
+	raw := strings.TrimSpace(req.RefreshToken)
+	if raw == "" {
+		utils.RespondError(ctx, http.StatusBadRequest, "INVALID_REQUEST", "refresh_token is required")
+		return
+	}
+
+	hash := utils.HashToken(raw)
+	var token models.RefreshToken
+	if err := global.Db.Where("token_hash = ?", hash).First(&token).Error; err != nil {
+		utils.RespondError(ctx, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid refresh token")
+		return
+	}
+	if token.RevokedAt != nil || time.Now().After(token.ExpiresAt) {
+		utils.RespondError(ctx, http.StatusUnauthorized, "UNAUTHORIZED", "Refresh token expired")
+		return
+	}
+
+	var user models.User
+	if err := global.Db.First(&user, token.UserID).Error; err != nil {
+		utils.RespondError(ctx, http.StatusUnauthorized, "USER_NOT_FOUND", "User not found")
+		return
+	}
+
+	accessToken, accessExp, err := utils.GenerateAccessToken(user.Username)
 	if err != nil {
 		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not generate token")
 		return
 	}
-	utils.RespondOK(ctx, gin.H{"token": token})
+	refreshToken, refreshExp, err := utils.GenerateRefreshToken()
+	if err != nil {
+		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not generate refresh token")
+		return
+	}
+
+	now := time.Now()
+	newRecord := models.RefreshToken{
+		UserID:    user.ID,
+		TokenHash: utils.HashToken(refreshToken),
+		ExpiresAt: refreshExp,
+	}
+
+	tx := global.Db.Begin()
+	if err := tx.Model(&token).Update("revoked_at", &now).Error; err != nil {
+		tx.Rollback()
+		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not rotate token")
+		return
+	}
+	if err := tx.Create(&newRecord).Error; err != nil {
+		tx.Rollback()
+		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not rotate token")
+		return
+	}
+	if err := tx.Commit().Error; err != nil {
+		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not rotate token")
+		return
+	}
+
+	expiresIn := int64(accessExp.Sub(now).Seconds())
+	refreshExpiresIn := int64(refreshExp.Sub(now).Seconds())
+	utils.RespondOK(ctx, gin.H{
+		"access_token":        accessToken,
+		"refresh_token":       refreshToken,
+		"token_type":          "Bearer",
+		"expires_in":          expiresIn,
+		"refresh_expires_in":  refreshExpiresIn,
+		"token":               utils.FormatBearerToken(accessToken),
+	})
+}
+
+func respondWithTokens(ctx *gin.Context, user models.User) {
+	accessToken, accessExp, err := utils.GenerateAccessToken(user.Username)
+	if err != nil {
+		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not generate token")
+		return
+	}
+	refreshToken, refreshExp, err := utils.GenerateRefreshToken()
+	if err != nil {
+		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not generate refresh token")
+		return
+	}
+
+	record := models.RefreshToken{
+		UserID:    user.ID,
+		TokenHash: utils.HashToken(refreshToken),
+		ExpiresAt: refreshExp,
+	}
+	if err := global.Db.Create(&record).Error; err != nil {
+		utils.RespondError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not persist refresh token")
+		return
+	}
+
+	now := time.Now()
+	expiresIn := int64(accessExp.Sub(now).Seconds())
+	refreshExpiresIn := int64(refreshExp.Sub(now).Seconds())
+	utils.RespondOK(ctx, gin.H{
+		"access_token":       accessToken,
+		"refresh_token":      refreshToken,
+		"token_type":         "Bearer",
+		"expires_in":         expiresIn,
+		"refresh_expires_in": refreshExpiresIn,
+		"token":              utils.FormatBearerToken(accessToken),
+	})
 }

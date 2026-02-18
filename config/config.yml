@@ -21,3 +21,23 @@ sms:
   accessKeyId: "LTAI5tNuvn83uJnkYG9WVaQj"
   accessKeySecret: "7OgnDVFcbpOl2xTrxsbPVEtlLTtfOT"
   securityToken: ""
+
+openai:
+  baseURL: "https://api.deepseek.com/v1"
+  apiKey: "sk-a41d1d493d2a494bac4cf154d73fc7e8"
+  model: "deepseek-chat"
+  timeout: 30
+
+notify:
+  enabled: true
+  pollIntervalSec: 60
+  leadMinutes: 2
+  graceMinutes: 2
+  channels:
+    sms: true
+    voice: true
+    call: true
+  webhook:
+    sms: "http://127.0.0.1:3001/notify/sms"
+    voice: "http://127.0.0.1:3001/notify/voice"
+    call: "http://127.0.0.1:3001/notify/call"

@@ -38,6 +38,28 @@ type config struct {
 		AccessKeySecret string
 		SecurityToken   string
 	}
+	OpenAI struct {
+		BaseURL string
+		APIKey  string
+		Model   string
+		Timeout int
+	}
+	Notify struct {
+		Enabled         bool
+		PollIntervalSec int
+		LeadMinutes     int
+		GraceMinutes    int
+		Channels        struct {
+			SMS   bool
+			Voice bool
+			Call  bool
+		}
+		Webhook struct {
+			SMS   string
+			Voice string
+			Call  string
+		}
+	}
 }
 
 var AppConfig *config
@@ -76,6 +98,9 @@ func InitConfig() {
 	)
 	// 可选：从配置注入 AK/SK（仅建议开发使用）
 	utils.SetSMSCredentialsFromConfig(AppConfig.SMS.AccessKeyId, AppConfig.SMS.AccessKeySecret, AppConfig.SMS.SecurityToken)
+
+	// OpenAI 配置
+	utils.SetOpenAIConfig(AppConfig.OpenAI.BaseURL, AppConfig.OpenAI.APIKey, AppConfig.OpenAI.Model, AppConfig.OpenAI.Timeout)
 
 	initDB()
 }

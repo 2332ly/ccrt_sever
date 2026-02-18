@@ -3,11 +3,13 @@ package main
 import (
 	"ccrt_sever/config"
 	"ccrt_sever/router"
+	"ccrt_sever/services"
 	"fmt"
 )
 
 func main() {
 	config.InitConfig()
+	services.StartMedicationReminderScheduler()
 	r := router.SetupRouter()
 	port := config.AppConfig.App.Port
 	if port == "" {
