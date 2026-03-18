@@ -59,11 +59,28 @@ type ScaleAssessment struct {
 
 type ScaleAnswer struct {
 	gorm.Model
-	AssessmentID uint   `json:"assessment_id" gorm:"index"`
-	UserID       uint   `json:"user_id" gorm:"index"`
-	QuestionID   uint   `json:"question_id" gorm:"index"`
-	UserAnswer   string `json:"user_answer" gorm:"type:text"`
-	Score        int    `json:"score"`
+	AssessmentID   uint   `json:"assessment_id" gorm:"index"`
+	UserID         uint   `json:"user_id" gorm:"index"`
+	QuestionID     uint   `json:"question_id" gorm:"index"`
+	UserAnswer     string `json:"user_answer" gorm:"type:text"`
+	AnswerPayload  string `json:"answer_payload" gorm:"type:text"`
+	DeviceMetrics  string `json:"device_metrics" gorm:"type:text"`
+	ManualOverride bool   `json:"manual_override"`
+	Score          int    `json:"score"`
+}
+
+type ScaleAnswerArtifact struct {
+	gorm.Model
+	AssessmentID uint    `json:"assessment_id" gorm:"index"`
+	AnswerID     uint    `json:"answer_id" gorm:"index"`
+	UserID       uint    `json:"user_id" gorm:"index"`
+	QuestionID   uint    `json:"question_id" gorm:"index"`
+	Kind         string  `json:"kind" gorm:"size:32;index"`
+	ArtifactKey  string  `json:"artifact_key" gorm:"size:255"`
+	ReviewStatus string  `json:"review_status" gorm:"size:32"`
+	AutoScore    int     `json:"auto_score"`
+	Confidence   float64 `json:"confidence"`
+	Meta         string  `json:"meta" gorm:"type:text"`
 }
 
 type AssessmentModuleScore struct {

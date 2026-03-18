@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"ccrt_sever/utils"
@@ -43,6 +44,26 @@ type config struct {
 		APIKey  string
 		Model   string
 		Timeout int
+	}
+	DashScope struct {
+		BaseURL             string
+		APIKey              string
+		Model               string
+		Voice               string
+		Timeout             int
+		VoiceCloneCreateURL string
+		VoiceCloneQueryURL  string
+		VoiceCloneDeleteURL string
+		VoiceCloneModel     string
+		VoiceCloneTimeout   int
+	}
+	AliyunNLS struct {
+		AccessKeyId     string
+		AccessKeySecret string
+		AppKey          string
+		TokenURL        string
+		AsrURL          string
+		Timeout         int
 	}
 	Notify struct {
 		Enabled         bool
@@ -101,6 +122,73 @@ func InitConfig() {
 
 	// OpenAI 配置
 	utils.SetOpenAIConfig(AppConfig.OpenAI.BaseURL, AppConfig.OpenAI.APIKey, AppConfig.OpenAI.Model, AppConfig.OpenAI.Timeout)
+
+	// DashScope TTS 配置
+	dashBaseURL := strings.TrimSpace(AppConfig.DashScope.BaseURL)
+	dashAPIKey := strings.TrimSpace(AppConfig.DashScope.APIKey)
+	dashModel := strings.TrimSpace(AppConfig.DashScope.Model)
+	dashVoice := strings.TrimSpace(AppConfig.DashScope.Voice)
+	if dashBaseURL == "" {
+		dashBaseURL = strings.TrimSpace(os.Getenv("DASHSCOPE_BASE_URL"))
+	}
+	if dashAPIKey == "" {
+		dashAPIKey = strings.TrimSpace(os.Getenv("DASHSCOPE_API_KEY"))
+	}
+	if dashModel == "" {
+		dashModel = strings.TrimSpace(os.Getenv("DASHSCOPE_MODEL"))
+	}
+	if dashVoice == "" {
+		dashVoice = strings.TrimSpace(os.Getenv("DASHSCOPE_VOICE"))
+	}
+	utils.SetDashScopeConfig(dashBaseURL, dashAPIKey, dashModel, dashVoice, AppConfig.DashScope.Timeout)
+	cloneCreateURL := strings.TrimSpace(AppConfig.DashScope.VoiceCloneCreateURL)
+	cloneQueryURL := strings.TrimSpace(AppConfig.DashScope.VoiceCloneQueryURL)
+	cloneDeleteURL := strings.TrimSpace(AppConfig.DashScope.VoiceCloneDeleteURL)
+	cloneModel := strings.TrimSpace(AppConfig.DashScope.VoiceCloneModel)
+	cloneTimeout := AppConfig.DashScope.VoiceCloneTimeout
+	if cloneCreateURL == "" {
+		cloneCreateURL = strings.TrimSpace(os.Getenv("DASHSCOPE_VOICE_CLONE_CREATE_URL"))
+	}
+	if cloneQueryURL == "" {
+		cloneQueryURL = strings.TrimSpace(os.Getenv("DASHSCOPE_VOICE_CLONE_QUERY_URL"))
+	}
+	if cloneDeleteURL == "" {
+		cloneDeleteURL = strings.TrimSpace(os.Getenv("DASHSCOPE_VOICE_CLONE_DELETE_URL"))
+	}
+	if cloneModel == "" {
+		cloneModel = strings.TrimSpace(os.Getenv("DASHSCOPE_VOICE_CLONE_MODEL"))
+	}
+	if cloneTimeout <= 0 {
+		if timeoutRaw := strings.TrimSpace(os.Getenv("DASHSCOPE_VOICE_CLONE_TIMEOUT")); timeoutRaw != "" {
+			if parsed, err := strconv.Atoi(timeoutRaw); err == nil {
+				cloneTimeout = parsed
+			}
+		}
+	}
+	utils.SetDashScopeVoiceCloneConfig(cloneCreateURL, cloneQueryURL, cloneDeleteURL, cloneModel, cloneTimeout)
+
+	// Aliyun NLS ASR 配置
+	nlsAK := strings.TrimSpace(AppConfig.AliyunNLS.AccessKeyId)
+	nlsSK := strings.TrimSpace(AppConfig.AliyunNLS.AccessKeySecret)
+	nlsAppKey := strings.TrimSpace(AppConfig.AliyunNLS.AppKey)
+	nlsTokenURL := strings.TrimSpace(AppConfig.AliyunNLS.TokenURL)
+	nlsAsrURL := strings.TrimSpace(AppConfig.AliyunNLS.AsrURL)
+	if nlsAK == "" {
+		nlsAK = strings.TrimSpace(os.Getenv("ALIYUN_NLS_ACCESS_KEY_ID"))
+	}
+	if nlsSK == "" {
+		nlsSK = strings.TrimSpace(os.Getenv("ALIYUN_NLS_ACCESS_KEY_SECRET"))
+	}
+	if nlsAppKey == "" {
+		nlsAppKey = strings.TrimSpace(os.Getenv("ALIYUN_NLS_APP_KEY"))
+	}
+	if nlsTokenURL == "" {
+		nlsTokenURL = strings.TrimSpace(os.Getenv("ALIYUN_NLS_TOKEN_URL"))
+	}
+	if nlsAsrURL == "" {
+		nlsAsrURL = strings.TrimSpace(os.Getenv("ALIYUN_NLS_ASR_URL"))
+	}
+	utils.SetAliyunNLSConfig(nlsAK, nlsSK, nlsAppKey, nlsTokenURL, nlsAsrURL, AppConfig.AliyunNLS.Timeout)
 
 	initDB()
 }

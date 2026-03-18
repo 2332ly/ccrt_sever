@@ -28,6 +28,26 @@ openai:
   model: "deepseek-chat"
   timeout: 30
 
+dashscope:
+  baseURL: "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+  apiKey: "sk-e7007e13ad63498c8ba11665a9c76d62"
+  model: "qwen3-tts-flash"
+  voice: "longxiaochun"
+  timeout: 30
+  voiceCloneCreateURL: "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
+  voiceCloneQueryURL: "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
+  voiceCloneDeleteURL: "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
+  voiceCloneModel: "qwen-tts"
+  voiceCloneTimeout: 60
+
+aliyunNls:
+  accessKeyId: "LTAI5tNuvn83uJnkYG9WVaQj"
+  accessKeySecret: "7OgnDVFcbpOl2xTrxsbPVEtlLTtfOT"
+  appKey: "zFix3BcPXuS3J69V"
+  tokenURL: "https://nls-meta.cn-shanghai.aliyuncs.com/"
+  asrURL: "https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/asr"
+  timeout: 30
+
 notify:
   enabled: true
   pollIntervalSec: 60

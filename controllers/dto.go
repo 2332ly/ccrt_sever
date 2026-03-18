@@ -2,7 +2,6 @@ package controllers
 
 import "encoding/json"
 
-// RegisterRequest 注册请求 DTO：必须手机号验证码 + 密码
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=3,max=64"`
 	Phone    string `json:"phone" binding:"required,min=6,max=32"`
@@ -10,9 +9,6 @@ type RegisterRequest struct {
 	SMSCode  string `json:"sms_code" binding:"required,min=4,max=8"`
 }
 
-// LoginRequest 登录请求 DTO：密码登录或短信登录二选一
-// - 若提供 password：按 username/phone + password 登录
-// - 若提供 sms_code：按 phone + sms_code 登录
 type LoginRequest struct {
 	Username string `json:"username" binding:"omitempty,min=3,max=64"`
 	Phone    string `json:"phone" binding:"omitempty,min=6,max=32"`
@@ -20,44 +16,73 @@ type LoginRequest struct {
 	SMSCode  string `json:"sms_code" binding:"omitempty,min=4,max=8"`
 }
 
-// SendSMSRequest 发送短信验证码
 type SendSMSRequest struct {
 	Phone string `json:"phone" binding:"required,min=6,max=32"`
 }
 
-// VerifySMSRequest 校验短信验证码
 type VerifySMSRequest struct {
 	Phone   string `json:"phone" binding:"required,min=6,max=32"`
 	SMSCode string `json:"sms_code" binding:"required,min=4,max=8"`
 }
 
-// RefreshTokenRequest 刷新 access_token
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
-// MedicationRequest 吃药提醒请求 DTO
 type MedicationRequest struct {
 	Name             string `json:"name" binding:"required"`
 	Dosage           string `json:"dosage"`
 	Frequency        string `json:"frequency"`
-	ReminderTime     string `json:"reminder_time"`                 // e.g. "08:00,20:00"
-	ReminderChannels string `json:"reminder_channels"`             // e.g. "app,sms,voice"
-	AlertStyle       string `json:"alert_style"`                   // strong/normal
-	StartDate        string `json:"start_date" binding:"required"` // Format: 2006-01-02
-	EndDate          string `json:"end_date"`                      // Format: 2006-01-02
+	ReminderTime     string `json:"reminder_time"`
+	ReminderChannels string `json:"reminder_channels"`
+	AlertStyle       string `json:"alert_style"`
+	StartDate        string `json:"start_date" binding:"required"`
+	EndDate          string `json:"end_date"`
 	Notes            string `json:"notes"`
 }
 
-// MMSESubmitRequest MMSE 提交作答
+type ReminderRequest struct {
+	Type             string `json:"type" binding:"required"`
+	Title            string `json:"title" binding:"required"`
+	Description      string `json:"description"`
+	ReminderTime     string `json:"reminder_time" binding:"required"`
+	RepeatRule       string `json:"repeat_rule"`
+	ReminderDate     string `json:"reminder_date"`
+	StartDate        string `json:"start_date"`
+	EndDate          string `json:"end_date"`
+	ReminderChannels string `json:"reminder_channels"`
+	AlertStyle       string `json:"alert_style"`
+	Notes            string `json:"notes"`
+}
+
 type MMSESubmitRequest struct {
 	ScaleVersionID uint              `json:"scale_version_id"`
 	Answers        []MMSEAnswerInput `json:"answers" binding:"required"`
 }
 
-// MMSEAnswerInput 单题作答
+type MMSEArtifactRefInput struct {
+	Kind         string          `json:"kind" binding:"required"`
+	ArtifactKey  string          `json:"artifact_key" binding:"required"`
+	ReviewStatus string          `json:"review_status,omitempty"`
+	AutoScore    *int            `json:"auto_score,omitempty"`
+	Confidence   *float64        `json:"confidence,omitempty"`
+	Meta         json.RawMessage `json:"meta,omitempty"`
+}
+
 type MMSEAnswerInput struct {
-	QuestionID  uint            `json:"question_id" binding:"required"`
-	UserAnswer  json.RawMessage `json:"user_answer"`
-	ManualScore *int            `json:"manual_score,omitempty"`
+	QuestionID     uint                   `json:"question_id" binding:"required"`
+	UserAnswer     json.RawMessage        `json:"user_answer,omitempty"`
+	AnswerPayload  json.RawMessage        `json:"answer_payload,omitempty"`
+	ArtifactRefs   []MMSEArtifactRefInput `json:"artifact_refs,omitempty"`
+	DeviceMetrics  json.RawMessage        `json:"device_metrics,omitempty"`
+	ManualOverride bool                   `json:"manual_override,omitempty"`
+	ManualScore    *int                   `json:"manual_score,omitempty"`
+}
+
+type CCRTArtifactPresignRequest struct {
+	FileName     string `json:"file_name" binding:"required"`
+	ContentType  string `json:"content_type" binding:"required"`
+	Kind         string `json:"kind" binding:"required"`
+	QuestionID   *uint  `json:"question_id,omitempty"`
+	AssessmentID *uint  `json:"assessment_id,omitempty"`
 }

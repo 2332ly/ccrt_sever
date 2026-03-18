@@ -16,6 +16,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var openAIChatFn = utils.OpenAIChat
+
 // GetMMSEScale 获取当前激活量表版本与题目
 func GetMMSEScale(ctx *gin.Context) {
 	var version models.ScaleVersion
@@ -96,28 +98,134 @@ func buildQuestionOptions(q models.ScaleQuestion) any {
 	}
 	ruleType, _ := rule["type"].(string)
 	ruleType = strings.TrimSpace(ruleType)
+	options := gin.H{}
 	switch ruleType {
 	case "fields_correct":
 		fields := buildFieldOptions(rule["fields"])
-		if len(fields) == 0 {
-			return nil
-		}
-		return gin.H{
-			"fields":          fields,
-			"score_per_field": toInt(rule["score_per_field"], 1),
+		if len(fields) > 0 {
+			options["fields"] = fields
+			options["score_per_field"] = toInt(rule["score_per_field"], 1)
 		}
 	case "set_match":
 		items := toStringSlice(rule["correct_set"])
-		if len(items) == 0 {
-			return nil
+		if len(items) > 0 {
+			options["items"] = items
+			options["score_per_item"] = toInt(rule["score_per_item"], 1)
 		}
-		return gin.H{
-			"items":          items,
-			"score_per_item": toInt(rule["score_per_item"], 1),
+	case "sequence_match":
+		sequence := toIntSlice(rule["correct_sequence"])
+		if len(sequence) > 0 {
+			options["correct_sequence"] = sequence
+			options["score_per_step"] = toInt(rule["score_per_step"], 1)
+			options["allow_partial"] = toBool(rule["allow_partial"])
 		}
-	default:
+	case "multi_step":
+		steps := toStringSlice(rule["steps"])
+		if len(steps) > 0 {
+			options["steps"] = steps
+			options["score_per_step"] = toInt(rule["score_per_step"], 1)
+		}
+	case "exact_text":
+		expected, _ := rule["expected"].(string)
+		if strings.TrimSpace(expected) != "" {
+			options["expected"] = strings.TrimSpace(expected)
+			options["score_value"] = toInt(rule["score_value"], 1)
+		}
+	}
+
+	for key, value := range buildCapabilityOptions(q, rule) {
+		if value == nil {
+			continue
+		}
+		options[key] = value
+	}
+	if len(options) == 0 {
 		return nil
 	}
+	return options
+}
+
+type mmseAnswerEvaluateRequest struct {
+	QuestionKey     string          `json:"question_key" binding:"required"`
+	QuestionPrompt  string          `json:"question_prompt" binding:"required"`
+	QuestionType    string          `json:"question_type" binding:"required"`
+	MaxScore        int             `json:"max_score"`
+	Transcript      string          `json:"transcript" binding:"required"`
+	SessionMode     string          `json:"session_mode,omitempty"`
+	Capability      json.RawMessage `json:"capability,omitempty"`
+	LocationContext json.RawMessage `json:"location_context,omitempty"`
+	ExpectedValues  json.RawMessage `json:"expected_values,omitempty"`
+}
+
+type mmseAnswerEvaluateResponse struct {
+	Score         int             `json:"score"`
+	Confidence    float64         `json:"confidence"`
+	Status        string          `json:"status"`
+	Reason        string          `json:"reason"`
+	Model         string          `json:"model,omitempty"`
+	AnswerPayload json.RawMessage `json:"answer_payload,omitempty"`
+}
+
+func EvaluateMMSEAnswer(ctx *gin.Context) {
+	if _, err := getCurrentUser(ctx); err != nil {
+		utils.RespondError(ctx, http.StatusUnauthorized, "USER_NOT_FOUND", "User not found")
+		return
+	}
+
+	var req mmseAnswerEvaluateRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		utils.RespondError(ctx, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	req.QuestionKey = strings.TrimSpace(req.QuestionKey)
+	req.QuestionPrompt = strings.TrimSpace(req.QuestionPrompt)
+	req.QuestionType = strings.TrimSpace(req.QuestionType)
+	req.Transcript = strings.TrimSpace(req.Transcript)
+	req.SessionMode = strings.TrimSpace(req.SessionMode)
+	if req.Transcript == "" {
+		utils.RespondError(ctx, http.StatusBadRequest, "INVALID_REQUEST", "transcript is required")
+		return
+	}
+
+	messages, err := buildMMSEAnswerEvaluationMessages(req)
+	if err != nil {
+		utils.RespondError(ctx, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	content, model, err := openAIChatFn(messages, 0.1)
+	if err != nil {
+		utils.RespondOK(ctx, failedMMSEAnswerEvaluateResponse(
+			req.Transcript,
+			"failed",
+			"AI 判分暂时不可用，已回退到自动失败收口。",
+			"",
+		))
+		return
+	}
+
+	parsed, err := parseMMSEAnswerEvaluateResponse(content)
+	if err != nil {
+		utils.RespondOK(ctx, failedMMSEAnswerEvaluateResponse(
+			req.Transcript,
+			"failed",
+			"AI 判分结果无法解析，已回退到自动失败收口。",
+			model,
+		))
+		return
+	}
+
+	response := normalizeMMSEAnswerEvaluateResponse(req, parsed)
+	response.Model = model
+	utils.RespondOK(ctx, gin.H{
+		"score":          response.Score,
+		"confidence":     response.Confidence,
+		"status":         response.Status,
+		"reason":         response.Reason,
+		"model":          response.Model,
+		"answer_payload": rawJSONToAny(response.AnswerPayload),
+	})
 }
 
 func buildFieldOptions(raw any) []gin.H {
@@ -224,24 +332,26 @@ func SubmitMMSEAssessment(ctx *gin.Context) {
 			questionIDs = append(questionIDs, q.ID)
 		}
 	}
-
 	if len(questionMap) == 0 {
 		utils.RespondError(ctx, http.StatusBadRequest, "INVALID_SCALE", "no questions configured")
 		return
 	}
 
-	// Validate answers completeness and duplicates
 	seen := map[uint]bool{}
-	for _, a := range req.Answers {
-		if _, ok := questionMap[a.QuestionID]; !ok {
+	for _, answer := range req.Answers {
+		if _, ok := questionMap[answer.QuestionID]; !ok {
 			utils.RespondError(ctx, http.StatusBadRequest, "INVALID_QUESTION", "question not found")
 			return
 		}
-		if seen[a.QuestionID] {
+		if seen[answer.QuestionID] {
 			utils.RespondError(ctx, http.StatusBadRequest, "DUPLICATE_QUESTION", "duplicate question answer")
 			return
 		}
-		seen[a.QuestionID] = true
+		if err := validateArtifactRefs(answer.ArtifactRefs); err != nil {
+			utils.RespondError(ctx, http.StatusBadRequest, "INVALID_ARTIFACT", err.Error())
+			return
+		}
+		seen[answer.QuestionID] = true
 	}
 	if len(seen) != len(questionIDs) {
 		utils.RespondError(ctx, http.StatusBadRequest, "INCOMPLETE_ANSWER", "all questions must be answered")
@@ -249,12 +359,13 @@ func SubmitMMSEAssessment(ctx *gin.Context) {
 	}
 
 	answers := make([]models.ScaleAnswer, 0, len(req.Answers))
+	pendingArtifacts := make([][]models.ScaleAnswerArtifact, 0, len(req.Answers))
 	moduleScores := map[uint]int{}
 	totalScore := 0
 
-	for _, a := range req.Answers {
-		q := questionMap[a.QuestionID]
-		score, err := scoreByRule(q, a)
+	for _, input := range req.Answers {
+		question := questionMap[input.QuestionID]
+		score, err := scoreByRule(question, input)
 		if err != nil {
 			utils.RespondError(ctx, http.StatusBadRequest, "SCORE_ERROR", err.Error())
 			return
@@ -262,19 +373,26 @@ func SubmitMMSEAssessment(ctx *gin.Context) {
 		if score < 0 {
 			score = 0
 		}
-		if score > q.MaxScore {
-			score = q.MaxScore
+		if score > question.MaxScore {
+			score = question.MaxScore
 		}
 
 		totalScore += score
-		moduleScores[q.ModuleID] += score
+		moduleScores[question.ModuleID] += score
 
 		answers = append(answers, models.ScaleAnswer{
-			UserID:     user.ID,
-			QuestionID: q.ID,
-			UserAnswer: strings.TrimSpace(string(a.UserAnswer)),
-			Score:      score,
+			UserID:         user.ID,
+			QuestionID:     question.ID,
+			UserAnswer:     legacyUserAnswerText(input),
+			AnswerPayload:  compactJSONText(answerPayloadForScoring(input)),
+			DeviceMetrics:  compactJSONText(input.DeviceMetrics),
+			ManualOverride: input.ManualOverride || input.ManualScore != nil,
+			Score:          score,
 		})
+		pendingArtifacts = append(
+			pendingArtifacts,
+			buildScaleAnswerArtifacts(user.ID, question.ID, input),
+		)
 	}
 
 	level := classifyMMSE(totalScore)
@@ -301,16 +419,31 @@ func SubmitMMSEAssessment(ctx *gin.Context) {
 			return err
 		}
 
+		for i := range pendingArtifacts {
+			for j := range pendingArtifacts[i] {
+				pendingArtifacts[i][j].AssessmentID = assessment.ID
+				pendingArtifacts[i][j].AnswerID = answers[i].ID
+			}
+			if len(pendingArtifacts[i]) == 0 {
+				continue
+			}
+			if err := tx.Create(&pendingArtifacts[i]).Error; err != nil {
+				return err
+			}
+		}
+
 		moduleScoreRows := make([]models.AssessmentModuleScore, 0, len(moduleScores))
-		for moduleID, s := range moduleScores {
+		for moduleID, score := range moduleScores {
 			moduleScoreRows = append(moduleScoreRows, models.AssessmentModuleScore{
 				AssessmentID: assessment.ID,
 				ModuleID:     moduleID,
-				Score:        s,
+				Score:        score,
 			})
 		}
-		if err := tx.Create(&moduleScoreRows).Error; err != nil {
-			return err
+		if len(moduleScoreRows) > 0 {
+			if err := tx.Create(&moduleScoreRows).Error; err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -589,6 +722,181 @@ func parseAIResponse(content string) (aiResponse, error) {
 	return aiResponse{}, errors.New("invalid ai response")
 }
 
+func buildMMSEAnswerEvaluationMessages(
+	req mmseAnswerEvaluateRequest,
+) ([]utils.OpenAIMessage, error) {
+	const systemPrompt = `你是 CCRT/MMSE 单题判分器。你的唯一任务是根据题目、识别文本和参考信息判断当前题目是否达标。
+只返回严格 JSON，不要输出任何额外说明、代码块或自然语言。
+输出字段固定为：
+- score: 整数，范围 0..max_score
+- confidence: 0..1 的小数
+- status: "matched" | "unmatched" | "low_confidence" | "failed"
+- reason: 简短中文说明，不超过 60 字
+- answer_payload: JSON 对象，至少包含 text 字段
+规则：
+1. 如果无法稳定判断，返回 status="low_confidence"，score=0。
+2. 如果回答明显不符合题意，返回 status="unmatched"，score=0。
+3. 只有证据充分时才返回 status="matched"。
+4. 不要编造上下文，也不要依赖 GPS 或未提供的信息。`
+
+	userPayload := map[string]any{
+		"question_key":     req.QuestionKey,
+		"question_prompt":  req.QuestionPrompt,
+		"question_type":    req.QuestionType,
+		"max_score":        req.MaxScore,
+		"transcript":       req.Transcript,
+		"session_mode":     req.SessionMode,
+		"question_profile": mmseAnswerEvaluationInstruction(req.QuestionKey),
+	}
+	if capability := rawJSONToAny(req.Capability); capability != nil {
+		userPayload["capability"] = capability
+	}
+	if locationContext := rawJSONToAny(req.LocationContext); locationContext != nil {
+		userPayload["location_context"] = locationContext
+	}
+	if expectedValues := rawJSONToAny(req.ExpectedValues); expectedValues != nil {
+		userPayload["expected_values"] = expectedValues
+	}
+
+	body, err := json.Marshal(userPayload)
+	if err != nil {
+		return nil, err
+	}
+	return []utils.OpenAIMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: string(body)},
+	}, nil
+}
+
+func mmseAnswerEvaluationInstruction(questionKey string) string {
+	switch strings.TrimSpace(questionKey) {
+	case "orientation_year", "orientation_season", "orientation_month", "orientation_day", "orientation_weekday":
+		return "时间定向题。只判断识别文本是否与当前日期时间答案一致。"
+	case "location_city", "location_district", "location_street", "location_place", "location_floor":
+		return "地点定向题。优先依据 location_context 和 expected_values 判断是否匹配，不允许自己猜测位置。"
+	case "memory_immediate", "memory_delayed":
+		return "词语记忆题。请识别命中的词项数量，并在 answer_payload.items 中返回命中的词项列表。"
+	case "language_watch", "language_pen":
+		return "命名题。只判断是否命中了目标词或常见同义表达，不要发散。"
+	case "language_sentence":
+		return "完整句子题。只判断文本是否像一句完整、通顺、符合题意的句子。"
+	default:
+		return "单题判分。严格根据 transcript 与 expected_values 判断是否达标。"
+	}
+}
+
+func parseMMSEAnswerEvaluateResponse(content string) (mmseAnswerEvaluateResponse, error) {
+	trimmed := strings.TrimSpace(content)
+	var res mmseAnswerEvaluateResponse
+
+	if err := json.Unmarshal([]byte(trimmed), &res); err == nil {
+		return res, nil
+	}
+
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end > start {
+		snippet := trimmed[start : end+1]
+		if err := json.Unmarshal([]byte(snippet), &res); err == nil {
+			return res, nil
+		}
+	}
+
+	return mmseAnswerEvaluateResponse{}, errors.New("invalid ai response")
+}
+
+func normalizeMMSEAnswerEvaluateResponse(
+	req mmseAnswerEvaluateRequest,
+	raw mmseAnswerEvaluateResponse,
+) mmseAnswerEvaluateResponse {
+	status := strings.ToLower(strings.TrimSpace(raw.Status))
+	if status == "" {
+		switch {
+		case raw.Confidence > 0 && raw.Confidence < 0.75:
+			status = "low_confidence"
+		case raw.Score > 0:
+			status = "matched"
+		default:
+			status = "unmatched"
+		}
+	}
+	switch status {
+	case "matched", "unmatched", "low_confidence", "failed":
+	default:
+		status = "failed"
+	}
+
+	if raw.Confidence < 0 {
+		raw.Confidence = 0
+	}
+	if raw.Confidence > 1 {
+		raw.Confidence = 1
+	}
+	if raw.Score < 0 {
+		raw.Score = 0
+	}
+	if req.MaxScore > 0 && raw.Score > req.MaxScore {
+		raw.Score = req.MaxScore
+	}
+	if status != "matched" {
+		raw.Score = 0
+	}
+	if len(raw.AnswerPayload) == 0 {
+		raw.AnswerPayload = mustCompactJSON(map[string]any{"text": req.Transcript})
+	}
+	if strings.TrimSpace(raw.Reason) == "" {
+		raw.Reason = "已完成自动判分。"
+	}
+
+	return mmseAnswerEvaluateResponse{
+		Score:         raw.Score,
+		Confidence:    raw.Confidence,
+		Status:        status,
+		Reason:        strings.TrimSpace(raw.Reason),
+		AnswerPayload: raw.AnswerPayload,
+	}
+}
+
+func failedMMSEAnswerEvaluateResponse(
+	transcript string,
+	status string,
+	reason string,
+	model string,
+) gin.H {
+	return gin.H{
+		"score":      0,
+		"confidence": 0,
+		"status":     status,
+		"reason":     reason,
+		"model":      model,
+		"answer_payload": map[string]any{
+			"text":              transcript,
+			"evaluation_status": status,
+		},
+	}
+}
+
+func rawJSONToAny(raw json.RawMessage) any {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return nil
+	}
+
+	var payload any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return trimmed
+	}
+	return payload
+}
+
+func mustCompactJSON(value any) json.RawMessage {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(payload)
+}
+
 func classifyMMSE(total int) string {
 	switch {
 	case total >= 27:
@@ -613,32 +921,33 @@ func scoreByRule(q models.ScaleQuestion, a MMSEAnswerInput) (int, error) {
 	}
 	ruleType, _ := rule["type"].(string)
 	ruleType = strings.TrimSpace(ruleType)
+	answerPayload := answerPayloadForScoring(a)
 
 	switch ruleType {
 	case "fields_correct":
 		fields := toStringSlice(rule["fields"])
 		per := toInt(rule["score_per_field"], 1)
-		correctCount := countFieldsCorrect(fields, a.UserAnswer)
+		correctCount := countFieldsCorrect(fields, answerPayload)
 		return correctCount * per, nil
 	case "set_match":
 		correct := toStringSlice(rule["correct_set"])
 		per := toInt(rule["score_per_item"], 1)
-		items := extractStringSlice(a.UserAnswer, "items")
+		items := extractStringSlice(answerPayload, "items")
 		return setMatchScore(correct, items) * per, nil
 	case "sequence_match":
 		correct := toIntSlice(rule["correct_sequence"])
 		per := toInt(rule["score_per_step"], 1)
-		seq := extractIntSlice(a.UserAnswer, "sequence")
+		seq := extractIntSlice(answerPayload, "sequence")
 		return sequenceMatchScore(correct, seq) * per, nil
 	case "multi_step":
 		steps := toStringSlice(rule["steps"])
 		per := toInt(rule["score_per_step"], 1)
-		done := extractStringSlice(a.UserAnswer, "steps_done")
+		done := extractStringSlice(answerPayload, "steps_done")
 		return setMatchScore(steps, done) * per, nil
 	case "exact_text":
 		expected, _ := rule["expected"].(string)
 		scoreValue := toInt(rule["score_value"], 1)
-		text := extractText(a.UserAnswer)
+		text := extractText(answerPayload)
 		if normalizeText(text) == normalizeText(expected) {
 			return scoreValue, nil
 		}
@@ -654,8 +963,9 @@ func scoreManual(q models.ScaleQuestion, a MMSEAnswerInput) (int, error) {
 	if a.ManualScore != nil {
 		return *a.ManualScore, nil
 	}
+	answerPayload := answerPayloadForScoring(a)
 	var obj map[string]any
-	if err := json.Unmarshal(a.UserAnswer, &obj); err == nil {
+	if err := json.Unmarshal(answerPayload, &obj); err == nil {
 		if v, ok := obj["score"]; ok {
 			return toInt(v, 0), nil
 		}

@@ -10,6 +10,7 @@ import (
 func main() {
 	config.InitConfig()
 	services.StartMedicationReminderScheduler()
+	services.StartGenericReminderScheduler()
 	r := router.SetupRouter()
 	port := config.AppConfig.App.Port
 	if port == "" {

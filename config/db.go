@@ -42,19 +42,27 @@ func initDB() {
 	// 3) 自动迁移表结构
 	if err := global.Db.AutoMigrate(
 		&models.User{},
+		&models.CareContact{},
+		&models.VoiceProfile{},
 		&models.RefreshToken{},
 		&models.Medication{},
 		&models.MedicationCheckin{},
 		&models.MedicationDispatch{},
+		&models.Reminder{},
+		&models.ReminderCheckin{},
+		&models.ReminderDispatch{},
 		&models.Scale{},
 		&models.ScaleVersion{},
 		&models.ScaleModule{},
 		&models.ScaleQuestion{},
 		&models.ScaleAssessment{},
 		&models.ScaleAnswer{},
+		&models.ScaleAnswerArtifact{},
 		&models.AssessmentModuleScore{},
 		&models.GameResult{},
 		&models.SosEvent{},
+		&models.CognitiveProfile{},
+		&models.TrainingPlan{},
 	); err != nil {
 		log.Fatal(err)
 	}
