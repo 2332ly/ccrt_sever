@@ -18,19 +18,19 @@ sms:
   validTimeSec: 300
   intervalSec: 60
   returnVerifyCode: true  # 开发调试用，返回验证码
-  accessKeyId: "LTAI5tNuvn83uJnkYG9WVaQj"
-  accessKeySecret: "7OgnDVFcbpOl2xTrxsbPVEtlLTtfOT"
+  accessKeyId: ""
+  accessKeySecret: ""
   securityToken: ""
 
 openai:
   baseURL: "https://api.deepseek.com/v1"
-  apiKey: "sk-a41d1d493d2a494bac4cf154d73fc7e8"
+  apiKey: ""
   model: "deepseek-chat"
   timeout: 30
 
 dashscope:
   baseURL: "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-  apiKey: "sk-e7007e13ad63498c8ba11665a9c76d62"
+  apiKey: ""
   model: "qwen3-tts-flash"
   voice: "longxiaochun"
   timeout: 30
@@ -41,9 +41,9 @@ dashscope:
   voiceCloneTimeout: 60
 
 aliyunNls:
-  accessKeyId: "LTAI5tNuvn83uJnkYG9WVaQj"
-  accessKeySecret: "7OgnDVFcbpOl2xTrxsbPVEtlLTtfOT"
-  appKey: "zFix3BcPXuS3J69V"
+  accessKeyId: ""
+  accessKeySecret: ""
+  appKey: ""
   tokenURL: "https://nls-meta.cn-shanghai.aliyuncs.com/"
   asrURL: "https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/asr"
   timeout: 30
